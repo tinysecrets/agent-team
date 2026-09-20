@@ -1,8 +1,28 @@
 # config/models.yaml
-# Free, locally-runnable models - Ollama default. Cloud free tiers are opt-in.
+# Inference routing. The D-A-I spine (dai-assistant) is the default backend: one
+# OpenAI-compatible router that rotates free provider tiers and enforces
+# policy/sovereign.json. The direct cloud backends below are fallbacks, not defaults.
 
-default_backend: ollama
+default_backend: dai_router
+fallback_backend: ollama
 
+# The D-A-I spine — dai-assistant `services/model-router` on 127.0.0.1:11435.
+# Per-role temperature is read from the matching entry in the `ollama:` block below,
+# which is retained purely as the per-role temperature table.
+dai_router:
+  base_url: http://127.0.0.1:11435/v1
+  models:
+    genie: dai/auto
+    coding: dai/auto
+    design: dai/auto
+    reporting: dai/auto
+    qa: dai/auto
+    research: dai/auto
+    integration: dai/auto
+    sidekick: dai/auto
+    vision: dai/vision-auto
+
+# Local Ollama: no key, last-resort fallback when the spine is unreachable.
 ollama:
   genie:
     model: qwen2.5:1.5b
@@ -28,6 +48,9 @@ ollama:
   sidekick:
     model: qwen2.5:1.5b
     temperature: 0.5
+
+# --- Direct cloud backends: reachable only when the spine is unavailable. ---
+# Prefer the spine. A token in the vault no longer overrides `default_backend`.
 
 groq:
   enabled_if_token: GROQ_API_KEY
