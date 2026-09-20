@@ -2,9 +2,15 @@
 agents/_llm.py
 ==============
 Minimal, dependency-light LLM client supporting:
-  * Ollama (default, local, free)
+  * D-A-I spine (default) -- the dai-assistant model router on 127.0.0.1:11435
+  * Ollama (local, free, last-resort fallback)
   * Groq    (opt-in via GROQ_API_KEY in vault)
   * HuggingFace Inference API (opt-in via HF_TOKEN in vault)
+
+The spine is the only inference path by default. It owns free-tier rotation, 429
+cooling, secret redaction and policy/sovereign.json -- routing through it is what
+applies those to agent prompts. Direct cloud backends are used only if the spine
+is explicitly selected out via `default_backend`.
 
 No paid backends. No telemetry. No phone-home.
 """
@@ -56,6 +62,35 @@ def _ollama_chat(model: str, system: str, user: str, temperature: float) -> str:
     )
     r.raise_for_status()
     return r.json()["message"]["content"]
+
+
+def _dai_router_chat(
+    base_url: str,
+    model: str,
+    system: str,
+    user: str,
+    temperature: float,
+) -> str:
+    """
+    Chat through the D-A-I spine -- the dai-assistant OpenAI-compatible model router.
+
+    Model ids: `dai/auto` (text-optimised rotation) and `dai/vision-auto` (vision).
+    The router, not this client, decides which free provider serves the request.
+    """
+    r = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        json={
+            "model": model,
+            "temperature": temperature,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        },
+        timeout=600,
+    )
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
 
 
 def _groq_chat(
@@ -143,8 +178,37 @@ def chat(role: str, user: str, vault_env: Optional[dict] = None) -> LLMResponse:
 
     vault_env = vault_env or {}
     backend = models.get("default_backend", "ollama")
+    fallback = models.get("fallback_backend", "ollama")
 
-    # Auto-escalate to free cloud tier if token is present in the vault.
+    if backend == "dai_router":
+        # The spine is the only inference path. A cloud token in the vault does NOT
+        # override it: routing through the router is what applies secret redaction and
+        # policy/sovereign.json. If the spine is unreachable we fail down to local
+        # Ollama -- never sideways to a direct, unredacted cloud call.
+        router = models.get("dai_router", {})
+        base_url = os.environ.get(
+            "DAI_ROUTER_URL", router.get("base_url", "http://127.0.0.1:11435/v1")
+        )
+        m = router.get("models", {}).get(model_key, "dai/auto")
+        temperature = models.get(fallback, {}).get(model_key, {}).get("temperature", 0.3)
+        try:
+            text = _dai_router_chat(base_url, m, system_prompt, user, temperature)
+        except requests.RequestException as exc:
+            if fallback != "ollama":
+                raise RuntimeError(
+                    f"D-A-I spine unreachable at {base_url} and "
+                    f"fallback_backend={fallback!r}."
+                ) from exc
+            local = models["ollama"][model_key]
+            text = _ollama_chat(
+                local["model"], system_prompt, user, local["temperature"]
+            )
+            return LLMResponse(
+                text=text, backend="ollama-fallback", model=local["model"]
+            )
+        return LLMResponse(text=text, backend="dai_router", model=m)
+
+    # Legacy direct backends -- reached only when default_backend names one of them.
     # Gemini first (best free reasoning), then Groq (fastest), then HF.
     if vault_env.get("GEMINI_API_KEY"):
         backend = "gemini"
