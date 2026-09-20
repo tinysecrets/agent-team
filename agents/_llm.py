@@ -193,7 +193,19 @@ def chat(role: str, user: str, vault_env: Optional[dict] = None) -> LLMResponse:
         temperature = models.get(fallback, {}).get(model_key, {}).get("temperature", 0.3)
         try:
             text = _dai_router_chat(base_url, m, system_prompt, user, temperature)
+        except requests.HTTPError as exc:
+            # The spine answered, so it is up. An error here (e.g. 503
+            # all_candidates_failed) means it already tried every candidate --
+            # including its own local Ollama last resort. Surface its message
+            # rather than masking it behind a second, local fallback.
+            status = exc.response.status_code if exc.response is not None else "?"
+            detail = exc.response.text[:300] if exc.response is not None else ""
+            raise RuntimeError(
+                f"D-A-I spine answered HTTP {status} for {m}: {detail}"
+            ) from exc
         except requests.RequestException as exc:
+            # Spine genuinely unreachable -- fail down to local Ollama, never
+            # sideways to a direct, unredacted cloud call.
             if fallback != "ollama":
                 raise RuntimeError(
                     f"D-A-I spine unreachable at {base_url} and "
