@@ -4,5 +4,13 @@ __pycache__/
 *.py[cod]
 .local/
 
+# Local credentials and environment configuration; keep example templates tracked.
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.*.sample
+
 # Local encrypted runtime state. Recreate with bootstrap.sh.
 keys/vault/
