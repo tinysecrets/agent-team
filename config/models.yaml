@@ -4,7 +4,7 @@
 # policy/sovereign.json. The direct cloud backends below are fallbacks, not defaults.
 
 default_backend: dai_router
-fallback_backend: ollama
+fallback_backend: disabled
 
 # The D-A-I spine — dai-assistant `services/model-router` on 127.0.0.1:11435.
 # Per-role temperature is read from the matching entry in the `ollama:` block below,
@@ -22,7 +22,7 @@ dai_router:
     sidekick: dai/auto
     vision: dai/vision-auto
 
-# Local Ollama: no key, last-resort fallback when the spine is unreachable.
+# Local Ollama model definitions are retained as reference values; inference fallback is disabled by owner policy.
 ollama:
   genie:
     model: qwen2.5:1.5b
@@ -49,7 +49,7 @@ ollama:
     model: qwen2.5:1.5b
     temperature: 0.5
 
-# --- Direct cloud backends: reachable only when the spine is unavailable. ---
+# --- Legacy direct cloud backends are manual-only; never use them as implicit fallbacks. ---
 # Prefer the spine. A token in the vault no longer overrides `default_backend`.
 
 groq:
